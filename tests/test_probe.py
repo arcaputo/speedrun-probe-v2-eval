@@ -196,7 +196,7 @@ def test_final_line_and_nan():
     text = log(480, 1790, upto=1790, val_every=0)
     assert probe.final_line(text) == (1790, round(4 + 3 * math.exp(-1790 / 300), 4), pytest.approx(3000 * 10 + 480 * 1780))
     r = probe.full_result(text, 1750)
-    assert set(r) == {"steps", "train_time_s", "num_iterations", "val_loss", "margin_to_target", "ms_per_step", "caveats"}
+    assert set(r) == {"steps", "train_time_s", "num_iterations", "val_loss", "margin_to_target", "num_iterations_for_target", "ms_per_step", "caveats"}
     assert r["steps"] == 1790 and r["ms_per_step"] == pytest.approx(480.0)
     bad = probe.full_result(log(480, 1790, upto=1790, val_every=0, nan_at=1790), None)
     assert "val_loss" not in bad and "diverged" in bad["critique"][0]
@@ -390,7 +390,7 @@ def test_no_gpu_gives_no_result(setup, monkeypatch):
 
 def test_full_run_end_to_end_with_num_iterations(setup, capsys):
     r = setup("full-run-1gpu", None, code(ms=470, hang=0), num_iterations=1800)
-    assert set(r) == {"val_loss", "margin_to_target", "steps", "num_iterations", "train_time_s", "ms_per_step", "caveats", "wall_s"}
+    assert set(r) == {"val_loss", "margin_to_target", "num_iterations_for_target", "steps", "num_iterations", "train_time_s", "ms_per_step", "caveats", "wall_s"}
     assert (r["steps"], r["num_iterations"]) == (1840, 1800)
     assert r["val_loss"] == round(4 + 3 * math.exp(-1840 / 300), 4)
     assert r["ms_per_step"] == pytest.approx(470.0)
@@ -442,3 +442,39 @@ def test_a_bad_parameter_exits_zero_with_no_result(tmp_path):
     env = {**os.environ, "HARNESS_RESULT_FILE": str(out), "PROBE_KIND": "loss-vs-parent", "PROBE_STEPS": "9000"}
     p = subprocess.run([sys.executable, str(EVAL / "probe.py")], env=env, capture_output=True, text=True)
     assert p.returncode == 0 and "PROBE_STEPS=9000 is outside 100–500" in p.stdout and not out.exists()
+
+
+def test_step_lines_are_echoed_for_the_progress_pattern(capsys: pytest.CaptureFixture[str]) -> None:
+    import re
+    text = "".join(f"step:{i}/2380 train_time:{i * 50}ms step_avg:50.00ms\n" for i in range(1, 21))
+    text += "step:20/2380 val_loss:5.1234 train_time:1000ms step_avg:50.00ms\nstep:21/2380 train_ti"
+    done = probe.echo_progress("candidate", text, 0)
+    assert done == 21 and probe.echo_progress("candidate", text, done) == 21  # nothing twice, nor the partial line
+    out = capsys.readouterr().out.splitlines()
+    assert out == ["candidate step:10/2380 train_time:500ms step_avg:50.00ms",
+                   "candidate step:20/2380 train_time:1000ms step_avg:50.00ms",
+                   "candidate step:20/2380 val_loss:5.1234 train_time:1000ms step_avg:50.00ms"]
+    for kind in tomllib.loads((EVAL / "eval.toml").read_text())["eval"]["procs"].values():
+        rx = re.compile(kind["progress_regex"])
+        assert [m.groupdict() for m in map(rx.search, out[1:])] == [
+            {"code": "candidate", "step": "20", "of": "2380", "val_loss": None, "train_time_ms": "1000"},
+            {"code": "candidate", "step": "20", "of": "2380", "val_loss": "5.1234", "train_time_ms": "1000"}]
+
+
+def test_num_iterations_for_target_is_linear_so_repeats_average_it():
+    # the parent's 1-GPU loss (3.2785 = 3.2783 on 8×H100 + bias) at 2380 needs about 7 more steps to pass 80% of the time
+    text = "step:2420/2420 val_loss:3.2785 train_time:1100000ms step_avg:454.55ms\n"
+    r = probe.full_result(text, 2380)
+    assert r["margin_to_target"] == pytest.approx(0.0015)
+    assert r["num_iterations_for_target"] == pytest.approx(2380 + (3.2785 - 0.0002 - 3.2779) / 5.9e-5, abs=0.1)
+    # linear in the loss: the mean of two runs' answers is the answer for their mean loss, as Kupanga averages repeats
+    a = probe.full_result(text.replace("3.2785", "3.2770"), 2380)["num_iterations_for_target"]
+    b = probe.full_result(text.replace("3.2785", "3.2800"), 2380)["num_iterations_for_target"]
+    assert (a + b) / 2 == pytest.approx(r["num_iterations_for_target"], abs=0.1)
+    assert "num_iterations_for_target" not in probe.full_result(text, None)
+
+
+def test_full_run_offers_the_platforms_most_repeats():
+    kind = tomllib.loads((EVAL / "eval.toml").read_text())["eval"]["procs"]["full-run-1gpu"]
+    assert kind["repeats"] == 4 and kind["baseline"] == "parent"
+    assert kind["outputs"]["num_iterations_for_target"]["noise"] == 25

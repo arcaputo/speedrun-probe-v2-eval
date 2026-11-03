@@ -34,7 +34,9 @@ to stop the run and report.
 
 The result is one JSON object, written to `$HARNESS_RESULT_FILE` and printed, as speedrun-perf does. Its fields
 are the kind's declared outputs, plus `critique` (a list of strings) when there are no candidate numbers, and
-`wall_s`. While it runs it prints `stage: <name>` lines from the kind's `stages`.
+`wall_s`. While it runs it prints `stage: <name>` lines from the kind's `stages`. It also echoes each code's step lines (every 10th
+training step and each validation) as `<parent|candidate> step:N/M [val_loss:X ]train_time:Tms`, which both kinds'
+`progress_regex` reads for the agent's `inspect(id, "progress")`.
 
 ## The kinds
 
@@ -76,6 +78,20 @@ node's starting code) with the same `num_iterations`, the first time a node asks
 report gives candidate, parent and delta for `val_loss`, `steps` and the timings. That first request holds twice the
 time limit below; later ones reuse the parent's numbers. loss-vs-parent is `baseline = "in-job"`: it measures the
 parent itself every time (it doesn't read `$HARNESS_BASELINE_FILE` or report a `parent` object).
+
+`repeats = 4`: the agent may ask for `repeats` 2 to 4, and Kupanga then runs that many copies of this kind in
+parallel on separate H100s (and as many of the parent's) and reports the mean, the noise divided by √n and each
+run's val loss. It costs n times the GPU-minutes in the same wall time; probe.py never sees the parameter. Left
+out, `num_iterations` is the code's own value, and a parent measured that way (it reports `num_iterations`) also
+serves a later request that names the same value.
+
+`margin_to_target` (3.28 − val_loss) and `num_iterations_for_target` turn the loss into the decision the
+benchmark makes. The benchmark counts a time when its 8 runs average below 3.28 at p < 0.01, which passes 80% of
+the time at a mean of about 3.2779. `num_iterations_for_target` is the step count that would put this run's loss
+there, at 5.9e-5 val_loss a step. Both are linear in the loss, so Kupanga's mean over repeats is the answer for
+the mean loss, and its noise (25 steps for one run) shrinks by √n. One run can't place a step count; 4 repeats
+place it to about ±13 steps. speedrun-target checks the committed candidate the same way with 8 runs after the
+turn.
 
 1. In a temporary copy of the candidate's code, sets `val_loss_every` to 0 (validation only after the last step,
    which saves about 10 passes) and, if given, `num_iterations` to the parameter.
@@ -162,8 +178,9 @@ predict the end (see Noise).
 
 ## Noise
 
-- **One seed.** Each code trains once. Differences of a few thousandths in val loss can be noise; nothing here
-  measures the run-to-run spread yet (an A/A probe on one code would).
+- **One seed.** Each code trains once. Differences of a few thousandths in val loss can be noise (±0.0015 a run,
+  ±0.0021 on a delta: backout-minimal-3's two runs of the same parent were 0.0014 apart). full-run-1gpu's `repeats`
+  averages up to 3 runs of each code.
 - **Early loss doesn't fix the final value.** At steps 100–500 most of the LR schedule, its cooldown included, is
   still ahead. A lead over the parent at 300–500 is a signal, not a result: a method can lead early and finish
   level, or the other way round. A method whose effect changes over training misleads most: on the H100 check

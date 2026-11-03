@@ -14,6 +14,9 @@ needs_parent = true   # rebuilds the parent from changes.diff (git apply -R): Ku
 baseline = "in-job"   # measures the parent itself, on the same machine (Kupanga's cached parent, if any, is in $HARNESS_BASELINE_FILE; unused)
 stages = ["downloading data", "rebuilding the parent", "compiling parent", "training parent",
           "compiling candidate", "training candidate"]
+# probe.py echoes every 10th training step and each validation as `<code> step:N/M [val_loss:X ]train_time:Tms`
+progress_regex = '^(?P<code>parent|candidate) step:(?P<step>\d+)/(?P<of>\d+) (?:val_loss:(?P<val_loss>[\d.]+|nan) )?train_time:(?P<train_time_ms>\d+)ms'
+
 [eval.procs.loss-vs-parent.params]
 steps = { type = "int", min = 100, max = 500, default = 300 }
 [eval.procs.loss-vs-parent.outputs]
@@ -35,11 +38,14 @@ description = "The candidate's whole training run on one H100 (8-way gradient ac
 max_wall_s = 2100
 baseline = "parent"   # runs only the code it is given: Kupanga also runs it on the parent's code, once per node and params, and reports the delta
 stages = ["downloading data", "compiling candidate", "training candidate", "validating candidate"]
+progress_regex = '^(?P<code>parent|candidate) step:(?P<step>\d+)/(?P<of>\d+) (?:val_loss:(?P<val_loss>[\d.]+|nan) )?train_time:(?P<train_time_ms>\d+)ms'
+repeats = 4   # the agent may ask for up to 4 copies in parallel (and 4 of the parent's): mean, noise / sqrt(n)
 [eval.procs.full-run-1gpu.params]
 num_iterations = { type = "int", min = 1500, max = 2600, optional = true }   # override the step count without editing the code
 [eval.procs.full-run-1gpu.outputs]
 val_loss = { type = "float", optional = true, noise = 0.0015, description = "Val loss after the last step (all 10.5M validation tokens; one seed, so a few thousandths can be noise)" }
-margin_to_target = { type = "float", optional = true, noise = 0.0015, description = "3.28 minus val_loss. The benchmark needs its 8 runs to average about 0.0016 under 3.28 (p < 0.01), 0.0021 to pass 80% of the time; one run's SD is 0.0015, worth about 25 steps, so use the speedrun-target gate (8 seeds) to choose a step count" }
+margin_to_target = { type = "float", optional = true, noise = 0.0015, description = "3.28 minus val_loss. The benchmark needs its 8 runs to average about 0.0016 under 3.28 (p < 0.01), 0.0021 to pass 80% of the time; one run's SD is 0.0015, worth about 25 steps, so ask for repeats to choose a step count" }
+num_iterations_for_target = { type = "float", optional = true, noise = 25, description = "The num_iterations at which the benchmark would pass 80% of the time if this run's loss were the mean: num_iterations + (val_loss − 0.0002 − 3.2779) / 5.9e-5 (the step cost near 2380 steps; 0.0002 is one GPU's bias against 8×H100). One run's noise is about ±25 steps; with repeats = 4, ±13" }
 steps = { type = "int", optional = true, description = "The run's planned total steps (num_iterations plus any extension the code adds)" }
 num_iterations = { type = "int", optional = true, description = "num_iterations the run used: the parameter if given, else the code's own value" }
 train_time_s = { type = "float", optional = true, description = "train_time of the final validation line on one H100, seconds: a relative signal only, about 8× the benchmark's" }
