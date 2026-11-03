@@ -35,7 +35,7 @@ wall_s = { type = "float", optional = true, description = "Probe wall time, seco
 class = "experiment"
 description = "The candidate's whole training run on one H100 (8-way gradient accumulation, the same math as 8×H100), optionally with num_iterations overridden: final val loss, steps, 1-GPU train time. Validation runs only at the end"
 # About 1900 s at num_iterations = 2600 (README, Cost and time).
-max_wall_s = 2100
+max_wall_s = 1800   # = the wall formula at num_iterations = 2600; 4 repeats with the parent hold 240 GPU-minutes
 baseline = "parent"   # runs only the code it is given: Kupanga also runs it on the parent's code, once per node and params, and reports the delta
 stages = ["downloading data", "compiling candidate", "training candidate", "validating candidate"]
 progress_regex = '^(?P<code>parent|candidate) step:(?P<step>\d+)/(?P<of>\d+) (?:val_loss:(?P<val_loss>[\d.]+|nan) )?train_time:(?P<train_time_ms>\d+)ms'
@@ -62,8 +62,10 @@ wall_s = { type = "float", optional = true, description = "Probe wall time, seco
 base_s = 1000
 per = { steps = 1.2 }
 
-# full-run-1gpu: setup and one compile ~650 s, then ~0.55 s a step with validation at the end. Without
+# full-run-1gpu: measured on prod 2026-11-03, a whole run at 2380 steps took 1430–1490 s (setup, compile, training,
+# validation); 500 s + 0.5 s a step is 1690 s there, about 15% over, so 4 repeats and their parent baseline (225
+# GPU-minutes) fit the default turn cap of 240 (650 + 0.55 held 261 and was refused). Without
 # num_iterations (the code's own step count) it holds max_wall_s.
 [eval.procs.full-run-1gpu.wall]
-base_s = 650
-per = { num_iterations = 0.55 }
+base_s = 500
+per = { num_iterations = 0.5 }

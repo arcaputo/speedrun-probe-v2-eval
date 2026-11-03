@@ -158,7 +158,7 @@ is more than the default per-turn cap.
 
 Each kind also has a `[wall]` formula in eval.toml, so a smaller request holds less and its job is killed at its own limit:
 - loss-vs-parent: 1000 s + 1.2 s × steps, at most 1500 (300 steps: 1360 s; job 2384 took 784 s);
-- full-run-1gpu: 650 s + 0.55 s × num_iterations, at most 2100.
+- full-run-1gpu: 500 s + 0.5 s × num_iterations, at most 1800 (measured 1430–1490 s at 2380 steps on 2026-11-03).
 Without a value for a parameter the formula uses, a probe holds `max_wall_s`.
 
 ## Checked on one H100
