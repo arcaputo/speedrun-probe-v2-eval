@@ -1,0 +1,15 @@
+# The same environment as speedrun-perf, speedrun-smoke and speedrun-8xh100 (python:3.12, their requirements.txt,
+# CUDA headers from pip wheels), on one H100. Each probe kind has its own max_wall_s in eval.toml, which is the
+# job's limit; probe.py also stops itself at its kind's max_wall_s.
+image = "python:3.12"
+requirements = "requirements.txt"
+# At least the largest max_wall_s (full-run-1gpu, 2100 s).
+timeout_s = 2100
+# A preempted spot run starts over from scratch; SkyPilot may recover it up to this many times.
+max_retries = 3
+
+[resources]
+cpus = "16+"
+memory = "64+"
+accelerators = "H100:1"
+use_spot = true
